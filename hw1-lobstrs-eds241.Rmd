@@ -3,16 +3,16 @@ title: "Assignment 1: California Spiny Lobster Abundance (*Panulirus Interruptus
 subtitle: "Assessing the Impact of Marine Protected Areas (MPAs) at 5 Reef Sites in Santa Barbara County"
 author: "EDS 241"
 date: "1/8/2024 (Due 1/22)"
-output: 
-    html_document:
-      theme: flatly
-    pdf_document: default
+output:
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(eval=FALSE, warning = FALSE, message = FALSE )
+knitr::opts_chunk$set(warning = FALSE, message = FALSE )
 ```
-
 ------------------------------------------------------------------------
 
 ![](figures/spiny2.jpg)
@@ -32,13 +32,13 @@ knitr::opts_chunk$set(eval=FALSE, warning = FALSE, message = FALSE )
 -  Your knitted presentation should meet the quality you'd submit to research colleagues or feel confident sharing publicly. Refer to the rubric for details about presentation standards.
 
 
-**Assignment submission (YOUR NAME):** ______________________________________
+**Assignment submission Josephine Cardelle:** ______________________________________
 
 
 ----------------------------------------------------------------------
 
 ```{r}
-
+# Load libraries
 library(tidyverse)
 library(here)
 library(janitor)
@@ -47,9 +47,12 @@ library(performance)
 library(jtools)
 library(gt)
 library(gtsummary)
+library(dplyr)
 library(MASS) ## NOTE: The `select()` function is masked. Use: `dplyr::select()` ##
 library(interactions) 
-
+library(ggridges)
+library(ggbeeswarm)
+library(kableExtra)
 ```
 
 ------------------------------------------------------------------------
@@ -79,6 +82,7 @@ Step 1: Anticipating potential sources of selection bias
 
 **a.** Do the control sites (Arroyo Quemado, Carpenteria, and Mohawk) provide a strong counterfactual for our treatment sites (Naples, Isla Vista)? Write a paragraph making a case for why this comparison is centris paribus or whether selection bias is likely (be specific!).  
 
+There is likely some selection bias in this treatment. One possible source of  selection bias is that the MPAs may have not been randomly selected. Naples and Isla Vista may have better conditions for lobster populations. Another source of selection bias is how close the locations are to large human populations and fishing centers. This could effect lobster abundance the designation of MPAs. 
 ------------------------------------------------------------------------
 
 Step 2: Read & wrangle data
@@ -89,19 +93,29 @@ Step 2: Read & wrangle data
 
 ```{r}
 # HINT: check for coding of missing values (`na = "-99999"`)
+# Read in data and clean names
+rawdata <- read_csv("data/spiny_abundance_sb_18.csv", na = "-99999" )
 
-rawdata <- 
-
+rawdata <- clean_names(rawdata)
 ```
 
-**c.** Create a new `df` named `tidyata`. Using the variable `site` (reef location) create a new variable `reef` as a `factor` and add the following labels in the order listed (i.e., re-order the `levels`): 
+**c.** Create a new `df` named `tidydata`. Using the variable `site` (reef location) create a new variable `reef` as a `factor` and add the following labels in the order listed (i.e., re-order the `levels`): 
     
     "Arroyo Quemado", "Carpenteria", "Mohawk", "Isla Vista",  "Naples"
 
 ```{r}
+# Add reef column with full site name
+tidydata <- rawdata %>% 
+    mutate(reef = case_when(site == "IVEE" ~ "Isla Vista",
+                         site == "NAPL" ~ "Naples",
+                         site == "AQUE" ~ "Arroyo Quemado",
+                         site == "CARP" ~ "Carpenteria",
+                         site == "MOHK" ~ "Mohawk"))
 
-tidydata <- 
-    
+# Order based on reef column
+tidydata$reef = factor(tidydata$reef, levels = c('Arroyo Quemado', 'Carpenteria', 'Mohawk', 'Isla Vista', 'Naples'))
+
+tidydata = tidydata[order(tidydata$reef), ]    
 ```
 
 Create new `df` named `spiny_counts` 
@@ -112,14 +126,49 @@ Create new `df` named `spiny_counts`
 - NOTE: The variable `counts` should have values which are integers (whole numbers). 
 - Make sure to account for missing cases (`na`)!
 
+
+
 **e.** Create a new variable `mpa` with levels `MPA` and `non_MPA`. For our regression analysis create a numerical variable `treat` where MPA sites are coded `1` and non_MPA sites are coded `0`
 
 ```{r}
 #HINT(d): Use `group_by()` & `summarize()` to provide the total number of lobsters observed at each site-year-transect row-observation. 
+# Change negative sizes to NA
+tidydata$size_mm <- replace(tidydata$size_mm, tidydata$size_mm <0, NA)
+
+# Group by site,year,transect and add count and mean size column
+spiny_counts <- tidydata %>% 
+    group_by(site, year, transect) %>% 
+    summarise(counts = sum(count, na.rm = TRUE),
+              mean_size = mean(size_mm, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    mutate(mpa = case_when(
+        site == "IVEE" ~ "MPA",
+        site == "NAPL" ~ "MPA",
+        site == "AQUE" ~ "non_MPA",
+        site == "CARP" ~ "non_MPA",
+        site == "MOHK" ~ "non_MPA"),
+        
+        treat = case_when(
+        mpa == "MPA" ~ 1,
+        mpa == "non_MPA" ~ 0
+        )
+    )
 
 #HINT(e): Use `case_when()` to create the 3 new variable columns
-
-spiny_counts <- 
+# Add mpa and treat column
+# spiny_counts <- spiny_counts %>% 
+#     mutate(mpa = case_when(
+#         site == "IVEE" ~ "MPA",
+#         site == "NAPL" ~ "MPA",
+#         site == "AQUE" ~ "non_MPA",
+#         site == "CARP" ~ "non_MPA",
+#         site == "MOHK" ~ "non_MPA"),
+#         
+#         treat = case_when(
+#         mpa == "MPA" ~ 1,
+#         mpa == "non_MPA" ~ 0
+#         )
+#     )
 
 ```
 
@@ -151,17 +200,57 @@ Create a plot of lobster **size** :
 4) You choose the grouping variable(s)!
 
 ```{r}
-# plot 1: ....
-
+# Violin plot grouped by reef site
 spiny_counts %>% 
-ggplot()
-    
+ggplot(aes(x = site, y = counts, fill = site)) +
+    geom_violin() +
+    geom_point(stat = "summary", fun = median, color = "black") +
+    annotate("text", x = 1.5, y = 115, label = "Black dot = Median", color = "black", size = 4, hjust = 0) +
+    theme_minimal() +
+    labs(title = "Lobster counts by site") +
+    theme(legend.position = "none")
+
+# Beeswarm plot grouped by MPA status
+ggplot(spiny_counts, aes(x = mpa, y = counts, color = mpa)) +
+    geom_boxplot(alpha = 0) +
+    geom_beeswarm() +
+    theme(legend.position =  "none") +
+    labs(title = "Lobster counts by MPA status")
+
+# calculate average by year
+mean_counts_per_year <- spiny_counts %>%
+  group_by(year) %>%
+  summarise(counts_by_year = sum(counts, na.rm = TRUE))
+
+# Histogram grouped by year
+ggplot(spiny_counts, aes(x = year, y = counts)) +
+  geom_histogram(stat = "identity", fill = "cornflowerblue", binwidth = 1) +
+  geom_hline(aes(yintercept = mean(mean_counts_per_year$counts_by_year)), color = "red", linetype = "dashed") + 
+  annotate("text", x = 2013, y = mean(mean_counts_per_year$counts_by_year) + 35, 
+           label = paste("Average:", round(mean(mean_counts_per_year$counts_by_year), 0)), color = "red") + 
+  theme_minimal() +
+  labs(title = "Lobster Counts by Year", x = "Year", y = "Counts") +
+  theme(legend.position = "none")
+
+
+# Jitter plot grouped by site showing size
+ggplot(spiny_counts, aes(x = site, y = mean_size)) +
+    geom_jitter(aes(colour = site)) +
+    theme_minimal() +
+    labs(title = "Lobster size by site") +
+    theme(legend.position = "none") +
+    geom_boxplot(alpha = 0)
 ```
 
 **c.** Compare means of the outcome by treatment group. Using the `tbl_summary()` function from the package [`gt_summary`](https://www.danieldsjoberg.com/gtsummary/articles/tbl_summary.html) 
 
 ```{r}
 # USE: gt_summary::tbl_summary()
+    
+spiny_counts %>% 
+    group_by(treat, counts, mean_size) %>% 
+    tbl_summary(by = treat, statistic = list(all_continuous() ~ "{mean}")) 
+    #as_kable()
 ```
 
 ------------------------------------------------------------------------
@@ -174,12 +263,14 @@ Step 4: OLS regression- building intuition
 
 ```{r}
 # NOTE: We will not evaluate/interpret model fit in this assignment (e.g., R-square)
+# OLS model
+m1_ols <- lm(counts ~ treat, data = spiny_counts)
 
-m1_ols <- 
-
-summ(m1_ols, model.fit = FALSE) 
+print(summ(m1_ols, model.fit = FALSE)) 
 
 ```
+
+The coefficient on the intercept (14.93) represents the lobster count when the there is no treatment (`treat` = 0). The coefficient on the predictor(treat) is how much the lobster count increases with treatment. So lobster count increases by about 5 lobster from non-MPA to MPA.
 
 **c.** Check the model assumptions using the `check_model` function from the `performance` package
 
@@ -204,6 +295,8 @@ check_model(m1_ols, check = "homogeneity")
 check_model(m1_ols, check = "pp_check")
 ```
 
+
+After checking the model, we can see our model is not consistent with the actual data distribution. All the check_model results showed that the actual data residuals are not normal and the variance is not homogeneous. We may be getting this because the data does not follow a linear model.
 ------------------------------------------------------------------------
 
 Step 5: Fitting GLMs
@@ -221,9 +314,16 @@ Step 5: Fitting GLMs
 
 #HINT2: For the second glm() argument `family` use the following specification option `family = poisson(link = "log")`
 
-m2_pois <- 
+# Poisson model
+m2_pois <- glm(counts ~ treat, family = poisson, data = spiny_counts)
 
+print(summ(m2_pois, model.fit = FALSE)) 
 ```
+The coefficient on the intercept (2.70) represents the lobster count when the there is no treatment (`treat` = 0). The coefficient on the predictor(treat) is how much the lobster count increases with treatment. So lobster count increases by about 0.3 lobster from non-MPA to MPA.
+
+Dispersion is the different between the mean and variance of the data and in a Poisson distribution they should be equal. Overdisperson is when the variance is greater than the mean, so the data is too widely spread out.
+
+Both the intercept and treatment coefficients are much smaller for this model than for the OLS model. The change in significance of the treatment effect is due to the fact that OLS assumes normally distributed errors with leads to larger significance.
 
 **e.** Check the model assumptions. Explain results.
 
@@ -241,6 +341,11 @@ check_overdispersion(m2_pois)
 check_zeroinflation(m2_pois)
 ```
 
+After checking the model assumptions we can see the model does not fit the data well. The posterior predictive check showed the model predicted data and observed data were not similar. The misspecified dispersion and zero inflation test showed the residual variance did not follow the predicted mean. The homogeneity of variance test did show that the variance was fairly homgeneous throughout. The influential observations and uniformity of residuals test also howed the model was not a good fit.
+
+The overdispersion test deteced overdispersion, meaning our variance is significantly greter than our mean. The zero-inflation test showed us that there are no zeros in the counts column so that is not affecting our model.
+
+
 **g.** Fit a negative binomial model using the function glm.nb() from the package `MASS` and check model diagnostics 
 
 **h.** In 1-2 sentences explain rationale for fitting this GLM model.
@@ -248,13 +353,13 @@ check_zeroinflation(m2_pois)
 **i.** Interpret the treatment estimate result in your own words. Compare with results from the previous model.
 
 ```{r}
-
 # NOTE: The `glm.nb()` function does not require a `family` argument
+# Negative binomial model
+m3_nb <- glm.nb(counts ~ treat, data = spiny_counts)
 
-m3_nb <- 
+print(summ(m3_nb, model.fit = FALSE)) 
 
 ```
-
 
 ```{r}
 check_overdispersion(m3_nb)
@@ -272,6 +377,11 @@ check_predictions(m3_nb)
 check_model(m3_nb)
 ```
 
+The coefficient on the intercept (2.70) represents the lobster count when the there is no treatment (`treat` = 0). The coefficient on the predictor(treat) is how much the lobster count increases with treatment. So lobster count increases by about 0.3 lobster from non-MPA to MPA. These number are similar to the numbers for the poisson model. However, the standard deviation and z values differ from the poisson model.
+
+A negative binomial model is appropriate when the variance is significantly greater than the mean (overdispersion) which we saw is happening when we used the poisson model.
+
+All of the checks for this model show it is a much better fit than the poisson model.
 
 ------------------------------------------------------------------------
 
@@ -282,24 +392,24 @@ Step 6: Compare models
 **c.** Write a short paragraph comparing the results. Is the treatment effect `robust` or stable across the model specifications. 
 
 ```{r}
-
-export_summs(# ADD MODELS
+# View models together
+print(export_summs(m1_ols, m2_pois, m3_nb,
              model.names = c("OLS","Poisson", "NB"),
-             statistics = "none")
+             statistics = "none"))
 
 ```
 
+The results for the Poisson and Negative Binomial models are very similar. However, the results from the OLS model differ greatly from them. So the treatment effect is robust in regards to Poisson and NB but not OLS.
 ------------------------------------------------------------------------
 
 Step 7: Building intuition - fixed effects
 
 **a.** Create  new `df` with the `year` variable converted to a factor
 
-**b.** Run the following OLS model using `lm()`
+**b.** Run the following negative binomial model using `glm.nb()`
 
-- Use the following specification for the outcome `log(counts+1)`
-- Estimate fixed effects for `year`
-- Include an interaction term between variables `treat` and `year`
+- Add fixed effects for year (i.e., dummy coefficients)
+- Include an interaction term between variables treat & year (treat*year)
 
 **c.** Take a look at the regression output. Each coefficient provides a comparison or the difference in means for a specific sub-group in the data. Informally, describe the what the model has estimated at a conceptual level (NOTE: you do not have to interpret coefficients individually)
 
@@ -307,16 +417,21 @@ Step 7: Building intuition - fixed effects
 
 
 ```{r}
-
+# Negative binomial model with fixed effects for year and interaction term
 ff_counts <- spiny_counts %>% 
     mutate(year=as_factor(year))
     
-m5_fixedeffs <- lm(
-    log(counts+1) ~ treat*year,
+m5_fixedeffs <- glm.nb(
+    counts ~ 
+        treat +
+        year +
+        treat*year,
     data = ff_counts)
 
-summ(m5_fixedeffs, model.fit = FALSE)
+print(summ(m5_fixedeffs, model.fit = FALSE))
 ```
+The intercept coefficient represents the count (log transformed) for the year 2012 untreated. The treat coefficient show the year 2012 change from untreated to treated. And the year coefficients show how the counts change from the baseline year to that year untreated. And the treat:year coefficients show how the counts change from the baseline to that year with treatment, added to the treat coefficient. It makes sense that treat is negative because it represents the 2012 year, when the MPAs were first established, so there wasnt much effect yet. However, for later years you need to include the interaction term, which are all positive, so increase the -0.72.
+
 
 **e.** Look at the model predictions: Use the `interact_plot()` function from package `interactions` to plot mean predictions by year and treatment status. 
 
@@ -324,13 +439,16 @@ summ(m5_fixedeffs, model.fit = FALSE)
 
 ```{r}
 
-# Hint 1: Group counts by `year` and `mpa` and calculate the `mean_count`
-# Hint 2: Convert variable `year` to a factor
-
 interact_plot(m5_fixedeffs, pred = year, modx = treat,
-              outcome.scale = "response")
+              outcome.scale = "link") +
+    labs(y = "log(counts)")# NOTE: y-axis on log-scale
+
+# HINT: Change `outcome.scale` to "response" to convert y-axis scale to counts
+
 
 ```
+
+The counts on average increase with treatment. The year that it decreases the most is 2012, which is when the MPAs were first established so there was not much effect yet. In 2013 there is only then a slight decrease. The counts then greatly increase with treatment in 2014 and 2015. It slightly decreases in 2016 but then goes back to increasing with the next two years.
 
 **g.** Using `ggplot()` create a plot in same style as the previous `interaction plot`, but displaying the original scale of the outcome variable (lobster counts). This type of plot is commonly used to show how the treatment effect changes across discrete time points (i.e., panel data).
 
@@ -344,9 +462,23 @@ The plot should have...
 # Hint 1: Group counts by `year` and `mpa` and calculate the `mean_count`
 # Hint 2: Convert variable `year` to a factor
 
-plot_counts <- 
+# View average lobster counts per year by treatment
+plot_counts <- spiny_counts %>% 
+    group_by(year, mpa) %>% 
+    summarise(mean_count = mean(counts)) %>% 
+    mutate(year = as_factor(year))
 
-# plot_counts %>% ggplot() ...
+plot_counts  %>% 
+    ggplot(aes(x = year, y = mean_count, group = mpa, linetype = mpa)) +
+    geom_line() +
+    geom_point() +
+    labs(title = "Average Lobster counts per year by MPA status",
+         color = "treat",
+         x = "Year",
+         y = "Average Counts") +
+    theme_minimal() +
+    scale_linetype_manual(values = c("solid", "dashed"))
+    
 ```
 
 ------------------------------------------------------------------------
@@ -354,12 +486,25 @@ plot_counts <-
 Step 8: Reconsider causal identification assumptions
 
 a. Discuss whether you think `spillover effects` are likely in this research context (see Glossary of terms; https://docs.google.com/document/d/1RIudsVcYhWGpqC-Uftk9UTz3PIq6stVyEpT44EPNgpE/edit?usp=sharing)
+
+I do believe spillover is likely in this research context. I believe this is likely due to the proximity of the locations. Protecting lobsters in one location will likely effect the amount of lobsters in a close location.
+
 b. Explain why spillover is an issue for the identification of causal effects
+
+Spillover is an issue because then the treatment is not only affecting the treated unit. It is also affecting the "untreated" unit.
+
 c. How does spillover relate to impact in this research setting?
+
+I believe protecting the lobsters in the treated areas has a positive impact on lobster counts in other areas. We can see from the graphs that the lobster counts increased in the non-MPAs as well as in the MPAs. 
+
 d. Discuss the following causal inference assumptions in the context of the MPA treatment effect estimator. Evaluate if each of the assumption are reasonable: 
     
     1) SUTVA: Stable Unit Treatment Value assumption 
+I do not believe this is a reasonable assumption in this context. I believe the treatment of the MPAs had an effect on the surrounding areas and therefore the non-MPAS. However, I do believe all units received the same treatment.
+    
     2) Excludability assumption
+I do not believe this is a reasonable assumption. I believe there could be other ways lobster count is effected besides MPA designation. 
+
 
 ------------------------------------------------------------------------
 
@@ -368,8 +513,131 @@ d. Discuss the following causal inference assumptions in the context of the MPA 
 > Use the recent lobster abundance data with observations collected up until 2024 (`lobster_sbchannel_24.csv`) to run an analysis evaluating the effect of MPA status on lobster counts using the same focal variables.
 
 a. Create a new script for the analysis on the updated data
+
+```{r}
+spiny_counts2 <- read_csv(here::here("data", "lobster_sbchannel_24.csv"), na = "-99999") %>% 
+    clean_names() %>%
+  group_by(site, year, transect) %>%
+  summarise(count = sum(count, na.rm = TRUE),
+            mean_size = mean(size_mm, na.rm = TRUE)) %>%
+  mutate(mpa = case_when(site %in% c("IVEE", "NAPL") ~ "MPA",
+                         TRUE ~ "non_MPA"),
+         treat = case_when(mpa == "MPA" ~ 1,
+                           TRUE ~ 0)) %>%
+  ungroup() %>% 
+  mutate(reef = factor(site, 
+                         levels = c("AQUE", "CARP", "MOHK", "IVEE", "NAPL"), 
+                         labels = c("Arroyo Quemado", "Carpenteria", "Mohawk", "Isla Vista",
+                                    "Naples")))
+
+```
+
+
+```{r}
+# Calculate mean count for MPA and non-MPA
+mean_counts_mpa <- spiny_counts2 %>%
+  group_by(mpa) %>%
+  summarize(mean_count = mean(count, na.rm = TRUE))
+
+# Make a plot
+ggplot(spiny_counts2, aes(x = mpa, y = count, color = mpa)) +
+    geom_boxplot(alpha = 0) +
+    geom_beeswarm() +
+    theme_minimal() +
+    theme(legend.position =  "none") +
+    labs(title = "Lobster counts by MPA status 2012-2024")
+```
+
 b. Run at least 3 regression models & assess model diagnostics
+```{r}
+ols_24 <- lm(count ~ treat, data = spiny_counts2)
+
+print(summary(ols_24))
+```
+
+
+```{r}
+print(check_model(ols_24,  check = "qq" ))
+```
+
+The q-q plot shows us that the distribution of our models residuals is not normal. If the dots followed the straight line it would suggest normality but our dots deviate heavily from the line suggesting they are not normal. 
+
+```{r}
+print(check_model(m1_ols, check = "normality"))
+```
+
+This plot shows us that our OLS regression model does not follow a normal distribution which is a key assumption of linear regression
+
+```{r}
+print(check_model(m1_ols, check = "homogeneity"))
+```
+
+This plot checks for constant variance. Since ours does not follow a horizontal line, we know our variance is not homogeneous. 
+
+```{r}
+print(check_model(m1_ols, check = "pp_check"))
+```
+
+The last plot shows us that our model-predicted data varies greatly from our observed data, which means it is not performing correctly.
+
+```{r}
+# Fit Poisson regression model
+pois_24 <- glm(count ~ treat, data = spiny_counts2, family = poisson(link = "log"))
+
+# Print summary of the fitted model
+print(summary(pois_24))
+```
+
+
+```{r}
+print(check_overdispersion(pois_24))
+```
+
+The dispersion test ratio is about 67 which is much higher than the theoretical value for a poisson model which is 1. It showed us that our variance is significantly greater than our mean. The small p value suggests significant overdispersion, meaning a poisson regression is not appropriate here. 
+
+```{r}
+print(check_zeroinflation(pois_24))
+```
+
+The zero inflation test showed that while our data had 51 observed zeros our model predicted no zeros. The 0.00 ratio shows significant zero-inflation.
+
+
+```{r}
+nb_24 <- glm.nb(count ~ treat, data = spiny_counts2)
+
+print(summary(nb_24))
+```
+
+```{r}
+print(check_overdispersion(nb_24))
+```
+
+No overdispersion was detected in this model
+
+```{r}
+print(check_zeroinflation(nb_24))
+```
+
+We had 51 observed zeros and 47 predicted zeros, which are relatively similar. Our ratio is 91 which is within the tolerance range.
+
 c. Compare and contrast results with the analysis from the 2012-2018 data sample (~ 2 paragraphs)
+
+```{r}
+summs_list2 <- export_summs(
+  ols_24, 
+  pois_24, 
+  nb_24, 
+  model.names = c("OLS", "Poisson", "Negative Binomial"),
+  statistics = "none"
+)
+
+# Print the summary tables for all three models
+print(summs_list2)
+```
+
+The first results showed an intercept of 22.73 meaning there are about 23 lobsters on average with no treatment (non-MPA) and the new intercept is 27.27 meaning there are about 27 lobsters on average at non-MPA sites.
+Our new results show larger treatment effects. The OLS treatment increased from 5.36 lobsters to 3.12 lobsters (on average difference from non-MPA to MPA). The poisson and NB models increased from coefficient on treatment of 0.21 to 0.25 which means it changed from about a 23% increase on average with treatment (MPAs) in lobster counts to about a 28% increase on average. 
+The first results also only shows significance in treatment in the poisson model while the new results showed significance in treatment in all the models. Our new results also had generally smaller standard errors. This suggests a more robust treatment in our new models, meaning the MPA sites have a significant effect on lobster counts.
 
 
 ------------------------------------------------------------------------
